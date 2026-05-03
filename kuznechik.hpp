@@ -1,18 +1,22 @@
 #ifndef _KUZNECHIK_HPP
 #define _KUZNECHIK_HPP
 
+#include "log.h"
 #include <array>
 #include <cstdint>
 #include <ctime>
 #include <immintrin.h>
-#include <random>
-#include <vector>
-#include <log.h>
-#include <sys/types.h>
+#include <iomanip>
+#include <iostream>
 #include <pwd.h>
+#include <random>
+#include <sys/types.h>
+#include <vector>
 
-static const char* module_name = "kuznechik-mac";
+static const char *module_name = "kuznechik-mac";
 static constexpr std::size_t BUFF_SIZE = (1 << 14);
+static constexpr std::size_t BLOCK_SIZE = 16;
+static constexpr std::size_t KEY_SIZE = 32;
 
 struct GFTables {
   static constexpr uint8_t GPOLY = 0xC3;
@@ -50,23 +54,26 @@ public:
   static const uint8_t PADDING_CONST = 0x80;
   static const std::size_t ROUNDS = 10;
 
-  using block_t = std::array<uint8_t, BLOCK_SIZE>;
-  using key_t = std::array<uint8_t, KEY_SIZE>;
+  using kblock_t = std::array<uint8_t, BLOCK_SIZE>;
+  using kkey_t = std::array<uint8_t, KEY_SIZE>;
 
   Kuznechik();
 
-  explicit Kuznechik(key_t &mkey);
+  explicit Kuznechik(kkey_t &mkey);
+  explicit Kuznechik(kkey_t &mkey, kblock_t &some_MAC);
 
   ~Kuznechik();
 
-  void authenticate_message(block_t &msg);
-  block_t process_sequence(const char &filename);
-  block_t process_sequence(std::vector<uint8_t> &filebuf);
+  void authenticate_message(const kblock_t &msg);
+  kblock_t process_sequence(const std::string &filename);
+  kblock_t process_sequence(std::vector<uint8_t> &filebuf);
+
+  friend std::ostream &operator<<(std::ostream &os, const kblock_t &block);
 
 private:
-  alignas(16) key_t master_key;
-  alignas(16) std::array<block_t, ROUNDS> round_key;
-  alignas(16) std::array<block_t, 2> MAC_key;
+  alignas(16) kkey_t master_key;
+  alignas(16) std::array<kblock_t, ROUNDS> round_key;
+  alignas(16) std::array<kblock_t, 2> MAC_key;
 
   static constexpr std::array<uint8_t, 256> SBOX = {
       0xFC, 0xEE, 0xDD, 0x11, 0xCF, 0x6E, 0x31, 0x16, 0xFB, 0xC4, 0xFA, 0xDA,
@@ -97,8 +104,6 @@ private:
 
   static constexpr GFTables gf_tables{};
 
-  alignas(16) block_t MAC;
-
   static constexpr uint8_t gmult_fast(uint8_t a, uint8_t b) {
     if (a == 0 || b == 0) {
       return 0;
@@ -107,13 +112,13 @@ private:
     return sum >= 255 ? gf_tables.exp[sum - 255] : gf_tables.exp[sum];
   }
 
-  static constexpr void func_S(block_t &msg) {
+  static constexpr void func_S(kblock_t &msg) {
     for (int i = 0; i < BLOCK_SIZE; ++i) {
       msg[i] = SBOX[msg[i]];
     }
   }
 
-  static constexpr void func_R(block_t &msg) {
+  static constexpr void func_R(kblock_t &msg) {
     uint8_t new_byte = 0;
     for (int i = 0; i < 16; ++i) {
       new_byte ^= gmult_fast(msg[i], linear_consts[i]);
@@ -124,13 +129,40 @@ private:
     msg[0] = new_byte;
   }
 
-  static constexpr void func_L(block_t &msg) {
+  static constexpr void func_L(kblock_t &msg) {
     for (int i = 0; i < 16; ++i) {
       func_R(msg);
     }
   }
 
-  static inline void func_L_fast(block_t &msg) {
+  alignas(16) inline static const auto L = []() {
+    std::array<std::array<kblock_t, 256>, 16> L{};
+    for (int i = 0; i < 16; ++i) {
+      for (int x = 0; x < 256; x++) {
+        kblock_t tmp{};
+        tmp[i] = (uint8_t)x;
+        func_L(tmp);
+        L[i][x] = tmp;
+      }
+    }
+    return static_cast<const std::array<std::array<kblock_t, 256>, 16>>(L);
+  }();
+
+  alignas(16) inline static const auto SL = []() {
+    std::array<std::array<kblock_t, 256>, 16> SL{};
+    for (int i = 0; i < 16; ++i) {
+      for (int x = 0; x < 256; x++) {
+        uint8_t s = SBOX[x];
+        SL[i][x] = L[i][s];
+      }
+    }
+    return SL;
+  }();
+
+  alignas(16) kblock_t MAC;
+
+
+  static inline void func_L_fast(kblock_t &msg) {
     __m128i acc = _mm_setzero_si128();
 
     const uint8_t *m = reinterpret_cast<uint8_t *>(msg.data());
@@ -171,12 +203,27 @@ private:
     _mm_storeu_si128(reinterpret_cast<__m128i *>(msg.data()), acc);
   }
 
+  inline static void print_block(std::ostream &os, const kblock_t &block) {
+    std::ios_base::fmtflags f(os.flags());
+
+    char fill = os.fill();
+    os << std::hex;
+    os.fill('0');
+
+    for (size_t i = 0; i < BLOCK_SIZE; ++i) {
+      os << std::setw(2) << static_cast<unsigned int>(block[i]);
+    }
+
+    os.flags(f);
+    os.fill(fill);
+  }
+
   alignas(16) inline static const auto iter_consts = []() {
-    std::array<block_t, 32> consts{};
+    std::array<kblock_t, 32> consts{};
     for (int i = 0; i < 32; ++i) {
-      block_t iter_const{};
+      kblock_t iter_const{};
       iter_const[15] = static_cast<uint8_t>(i + 1);
-      func_L(iter_const);
+      func_L_fast(iter_const);
       consts[i] = iter_const;
     }
     return consts;
@@ -184,54 +231,30 @@ private:
 
   static_assert(iter_consts.size() == 32);
 
-  alignas(16) inline static const auto L = []() {
-    std::array<std::array<block_t, 256>, 16> L{};
-    for (int i = 0; i < 16; ++i) {
-      for (int x = 0; x < 256; x++) {
-        block_t tmp{};
-        tmp[i] = (uint8_t)x;
-        func_L(tmp);
-        L[i][x] = tmp;
-      }
-    }
-    return L;
-  }();
-
-  alignas(16) inline static const auto SL = []() {
-    std::array<std::array<block_t, 256>, 16> SL{};
-    for (int i = 0; i < 16; ++i) {
-      for (int x = 0; x < 256; x++) {
-        uint8_t s = SBOX[x];
-        SL[i][x] = L[i][s];
-      }
-    }
-    return SL;
-  }();
-
-  inline static void func_SL_fast(block_t &msg) {
+  inline static void func_SL_fast(kblock_t &msg) {
     __m128i acc = _mm_setzero_si128();
     const uint8_t *m = reinterpret_cast<uint8_t *>(msg.data());
 
     acc = _mm_xor_si128(acc,
                         *reinterpret_cast<const __m128i *>(SL[0][m[0]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[1][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[1][m[1]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[2][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[2][m[2]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[3][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[3][m[3]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[4][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[4][m[4]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[5][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[5][m[5]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[6][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[6][m[6]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[7][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[7][m[7]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[8][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[8][m[8]].data()));
     acc = _mm_xor_si128(acc,
-                        *reinterpret_cast<const __m128i *>(SL[9][m[0]].data()));
+                        *reinterpret_cast<const __m128i *>(SL[9][m[9]].data()));
     acc = _mm_xor_si128(
         acc, *reinterpret_cast<const __m128i *>(SL[10][m[10]].data()));
     acc = _mm_xor_si128(
@@ -248,31 +271,33 @@ private:
     _mm_storeu_si128(reinterpret_cast<__m128i *>(msg.data()), acc);
   }
 
-  inline static void XOR(block_t &lhs, const block_t &rhs) {
-    for (int i = 0; i < BLOCK_SIZE; ++i) {
-      lhs[i] ^= rhs[i];
-    }
+  inline static void XOR(kblock_t &lhs, const kblock_t &rhs) {
+    volatile __m128i a =
+        _mm_loadu_si128(reinterpret_cast<__m128i *>(lhs.data()));
+    __m128i b = _mm_loadu_si128(reinterpret_cast<const __m128i *>(rhs.data()));
+    __m128i r = _mm_xor_si128(a, b);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(lhs.data()), r);
   }
 
-  inline static void round_func(block_t &lhs, block_t &rhs, int round) {
-    block_t tmp_lhs = lhs, tmp_const = iter_consts[round];
+  inline static void round_func(kblock_t &lhs, kblock_t &rhs, int round) {
+    kblock_t tmp_lhs = lhs, tmp_const = iter_consts[round];
     XOR(tmp_lhs, tmp_const);
     func_SL_fast(tmp_lhs);
     XOR(tmp_lhs, rhs);
     rhs = lhs, lhs = tmp_lhs;
   }
 
-  inline void encrypt_func(block_t &msg) {
+  inline void encrypt_func(kblock_t &msg) {
     for (int i = 0; i < ROUNDS - 1; ++i) {
-      block_t tmp_const = round_key[i];
+      kblock_t tmp_const = round_key[i];
       XOR(msg, tmp_const);
       func_SL_fast(msg);
     }
-    block_t tmp_const = round_key[ROUNDS - 1];
+    kblock_t tmp_const = round_key[ROUNDS - 1];
     XOR(msg, tmp_const);
   }
 
-  inline static void flush_master_key(key_t &mkey) {
+  inline static void flush_master_key(kkey_t &mkey) {
     std::random_device rd;
     std::uniform_int_distribution<uint8_t> dist(0, 255);
     for (int i = 0; i < KEY_SIZE; ++i) {
@@ -280,20 +305,20 @@ private:
     }
   }
 
-  inline static void flush_round_keys(const std::array<block_t, 10> &rkeys) {
+  inline static void flush_round_keys(std::array<kblock_t, 10> &rkeys) {
     std::random_device rd;
     std::uniform_int_distribution<uint8_t> dist(0, 255);
-    for (auto key : rkeys) {
-      for (int i = 0; i < KEY_SIZE; ++i) {
-        key[i] = static_cast<uint8_t>(dist(rd));
+    for (int i = 0; i < rkeys.size(); ++i) {
+      for (int j = 0; j < rkeys[i].size(); ++j) {
+        rkeys[i][j] = static_cast<uint8_t>(dist(rd));
       }
     }
   }
 
-  inline static const std::array<block_t, ROUNDS>
-  init_round_keys(const key_t &mkey) {
-    std::array<block_t, 10> rkeys{};
-    block_t left{}, right{};
+  inline static const std::array<kblock_t, ROUNDS>
+  init_round_keys(const kkey_t &mkey) {
+    std::array<kblock_t, ROUNDS> rkeys{};
+    kblock_t left{}, right{};
     int i = 0;
     for (; i < 16; ++i) {
       left[i] = mkey[i];
@@ -310,10 +335,10 @@ private:
       rkeys[2 * i] = left;
       rkeys[2 * i + 1] = right;
     }
-    return static_cast<const std::array<block_t, 10>>(rkeys);
+    return static_cast<const std::array<kblock_t, ROUNDS>>(rkeys);
   }
 
-  inline static void shift_left_bit(block_t &msg) {
+  inline static void shift_left_bit(kblock_t &msg) {
     uint8_t carry = 0;
     for (int i = BLOCK_SIZE - 1; i >= 0; --i) {
       uint8_t tmp_carry = msg[i] & 0x80 ? 1 : 0;
@@ -323,9 +348,9 @@ private:
     }
   }
 
-  inline const std::array<block_t, 2> init_OMAC_keys() {
-    std::array<block_t, 2> mac_keys{};
-    block_t zero_vec{}, b_vec{};
+  inline const std::array<kblock_t, 2> init_OMAC_keys() {
+    std::array<kblock_t, 2> mac_keys{};
+    kblock_t zero_vec{}, b_vec{};
     b_vec[BLOCK_SIZE - 1] = B128;
     encrypt_func(zero_vec);
     int MSB1 = zero_vec[0] & 0x80 ? 1 : 0, MSB2 = zero_vec[0] & 0x40 ? 1 : 0;
@@ -337,11 +362,13 @@ private:
     if (MSB2) {
       XOR(zero_vec, b_vec);
     }
+    shift_left_bit(zero_vec);
     mac_keys[1] = zero_vec;
+
     return mac_keys;
   }
 
-  inline void flush_data(std::vector<uint8_t> filebuf) {
+  inline static void flush_data(std::vector<uint8_t> &filebuf) {
     std::random_device rd;
     std::uniform_int_distribution<uint8_t> dist(0, 255);
     for (int i = 0; i < filebuf.size(); ++i) {
@@ -349,15 +376,48 @@ private:
     }
   }
 
-  inline static void flush_OMAC_keys(const std::array<block_t, 2> &mac_keys) {
+  inline static void flush_OMAC_keys(std::array<kblock_t, 2> &mac_keys) {
     std::random_device rd;
     std::uniform_int_distribution<uint8_t> dist(0, 255);
-    for (auto key : mac_keys) {
+    for (int j = 0; j < 2; j++) {
       for (int i = 0; i < BLOCK_SIZE; ++i) {
-        key[i] = static_cast<uint8_t>(dist(rd));
+        mac_keys[j][i] = static_cast<uint8_t>(dist(rd));
       }
     }
   }
+
+  inline static void flush_block(kblock_t &msg) {
+    std::random_device rd;
+    std::uniform_int_distribution<uint8_t> dist(0, 255);
+    for (int i = 0; i < BLOCK_SIZE; ++i) {
+      msg[i] = static_cast<uint8_t>(dist(rd));
+    }
+  }
+
+  inline static void pad_last_block(kblock_t &msg, int bytes_count) {
+    msg[BLOCK_SIZE - bytes_count] = PADDING_CONST;
+    for (int i = BLOCK_SIZE - bytes_count + 1; i < BLOCK_SIZE; ++i) {
+      msg[i] = 0;
+    }
+  }
 };
+
+inline std::ostream &operator<<(std::ostream &os,
+                                const Kuznechik::kblock_t &block) {
+  std::ios_base::fmtflags f(os.flags());
+
+  char fill = os.fill();
+  os << std::hex;
+  os.fill('0');
+
+  for (size_t i = 0; i < BLOCK_SIZE; ++i) {
+    os << std::setw(2) << static_cast<unsigned int>(block[i]);
+  }
+
+  os.flags(f);
+  os.fill(fill);
+
+  return os;
+}
 
 #endif // _KUZNECHIK_HPP
