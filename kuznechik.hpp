@@ -1,7 +1,6 @@
 #ifndef _KUZNECHIK_HPP
 #define _KUZNECHIK_HPP
 
-#include "log.h"
 #include <array>
 #include <cstdint>
 #include <ctime>
@@ -14,7 +13,7 @@
 #include <vector>
 
 static const char *module_name = "kuznechik-mac";
-static constexpr std::size_t BUFF_SIZE = (1 << 14);
+static constexpr std::size_t BUFF_SIZE = (1 << 17);
 static constexpr std::size_t BLOCK_SIZE = 16;
 static constexpr std::size_t KEY_SIZE = 32;
 
@@ -66,7 +65,7 @@ public:
 
   void authenticate_message(const kblock_t &msg);
   kblock_t process_sequence(const std::string &filename);
-  kblock_t process_sequence(std::vector<uint8_t> &filebuf);
+  kblock_t process_sequence(const std::string &filename, const std::string &keyfile, int key_upd_interval);
 
   friend std::ostream &operator<<(std::ostream &os, const kblock_t &block);
 
@@ -412,6 +411,23 @@ inline std::ostream &operator<<(std::ostream &os,
 
   for (size_t i = 0; i < BLOCK_SIZE; ++i) {
     os << std::setw(2) << static_cast<unsigned int>(block[i]);
+  }
+
+  os.flags(f);
+  os.fill(fill);
+
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream &os, const Kuznechik::kkey_t &mkey) {
+   std::ios_base::fmtflags f(os.flags());
+
+  char fill = os.fill();
+  os << std::hex;
+  os.fill('0');
+
+  for (size_t i = 0; i < KEY_SIZE; ++i) {
+    os << std::setw(2) << static_cast<unsigned int>(mkey[i]);
   }
 
   os.flags(f);
