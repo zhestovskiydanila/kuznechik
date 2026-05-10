@@ -133,6 +133,9 @@ int authenticate_user() {
   return 0;
 }
 
+std::random_device Kuznechik::rd;
+std::uniform_int_distribution<uint8_t> Kuznechik::dist(0, 255);
+
 Kuznechik::Kuznechik()
     : MAC{}, master_key{}, round_key(init_round_keys(master_key)),
       MAC_key(init_OMAC_keys()) {
@@ -318,8 +321,13 @@ Kuznechik::kblock_t Kuznechik::process_sequence(const std::string &filename,
   key_fs.close();
 
   kkey_t current_master_key = all_keys[0];
+  
   round_key = init_round_keys(current_master_key);
   MAC_key = init_OMAC_keys();
+  LOG_EVENT(KEY_DIGEST, MSG_ID_KEY_DIGEST, module_name);
+
+  flush_master_key(all_keys[0]);
+  LOG_EVENT(KEY_FLUSH, MSG_ID_KEY_FLUSH, module_name);
 
   std::vector<uint8_t> buffer(BUFF_SIZE);
   kblock_t msg{}, last_block{};
@@ -348,12 +356,17 @@ Kuznechik::kblock_t Kuznechik::process_sequence(const std::string &filename,
       if (processed_blocks > 0 && processed_blocks % key_upd_interval == 0) {
         int key_index = processed_blocks / key_upd_interval;
         if (key_index >= key_count) {
-          fprintf(stderr, "Not enough keys for all blocks\n");
+          fprintf(stderr, "Недостаточно ключевой информации для всех блоков\n");
           std::exit(EXIT_FAILURE);
         }
         current_master_key = all_keys[key_index];
         round_key = init_round_keys(current_master_key);
         MAC_key = init_OMAC_keys();
+        LOG_EVENT(KEY_DIGEST, MSG_ID_KEY_DIGEST, module_name);
+
+        flush_master_key(all_keys[key_index]);
+        LOG_EVENT(KEY_FLUSH, MSG_ID_KEY_FLUSH, module_name);
+
       }
 
       offset += BLOCK_SIZE;
@@ -406,33 +419,6 @@ Kuznechik::kblock_t Kuznechik::process_sequence(const std::string &filename,
 }
 
 int main() {
-  /*  std::string fname;
-   std::string mkey;
-   if (authenticate_user() != 0) {
-     LOG_EVENT(AUTH_FAIL, MSG_ID_AUTH_FAIL, module_name);
-     return -1;
-   } else {
-     LOG_EVENT(AUTH_SUCCESS, MSG_ID_AUTH_SUCCESS, module_name);
-   }
-   std::cout << "Введите имя файла" << std::endl;
-   std::cin >> fname;
-   std::cout << "Введите ключ" << std::endl;
-
-   struct termios oldt, newt;
-   tcgetattr(STDIN_FILENO, &oldt);
-   newt = oldt;
-   newt.c_lflag &= ~ECHO;
-   tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-   std::cin >> mkey;
-   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-   std::cout << std::endl;
-   Kuznechik::kkey_t key;
-   key = scan_key_from_string(mkey);
-
-   Kuznechik cipher{key};
-   Kuznechik::kblock_t MAC = cipher.process_sequence(fname);
-   std::cout << "Значение имитовставки " << MAC << std::endl; */
-
   if (authenticate_user() != 0) {
     LOG_EVENT(AUTH_FAIL, MSG_ID_AUTH_FAIL, module_name);
     return -1;

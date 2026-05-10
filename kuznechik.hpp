@@ -74,6 +74,9 @@ private:
   alignas(16) std::array<kblock_t, ROUNDS> round_key;
   alignas(16) std::array<kblock_t, 2> MAC_key;
 
+  static std::random_device rd;
+  static std::uniform_int_distribution<uint8_t> dist;
+
   static constexpr std::array<uint8_t, 256> SBOX = {
       0xFC, 0xEE, 0xDD, 0x11, 0xCF, 0x6E, 0x31, 0x16, 0xFB, 0xC4, 0xFA, 0xDA,
       0x23, 0xC5, 0x04, 0x4D, 0xE9, 0x77, 0xF0, 0xDB, 0x93, 0x2E, 0x99, 0xBA,
@@ -297,16 +300,13 @@ private:
   }
 
   inline static void flush_master_key(kkey_t &mkey) {
-    std::random_device rd;
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
+
     for (int i = 0; i < KEY_SIZE; ++i) {
       mkey[i] = static_cast<uint8_t>(dist(rd));
     }
   }
 
   inline static void flush_round_keys(std::array<kblock_t, 10> &rkeys) {
-    std::random_device rd;
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
     for (int i = 0; i < rkeys.size(); ++i) {
       for (int j = 0; j < rkeys[i].size(); ++j) {
         rkeys[i][j] = static_cast<uint8_t>(dist(rd));
@@ -368,16 +368,12 @@ private:
   }
 
   inline static void flush_data(std::vector<uint8_t> &filebuf) {
-    std::random_device rd;
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
     for (int i = 0; i < filebuf.size(); ++i) {
       filebuf[i] = static_cast<uint8_t>(dist(rd));
     }
   }
 
   inline static void flush_OMAC_keys(std::array<kblock_t, 2> &mac_keys) {
-    std::random_device rd;
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
     for (int j = 0; j < 2; j++) {
       for (int i = 0; i < BLOCK_SIZE; ++i) {
         mac_keys[j][i] = static_cast<uint8_t>(dist(rd));
@@ -386,8 +382,6 @@ private:
   }
 
   inline static void flush_block(kblock_t &msg) {
-    std::random_device rd;
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
     for (int i = 0; i < BLOCK_SIZE; ++i) {
       msg[i] = static_cast<uint8_t>(dist(rd));
     }
@@ -435,5 +429,6 @@ inline std::ostream& operator<<(std::ostream &os, const Kuznechik::kkey_t &mkey)
 
   return os;
 }
+
 
 #endif // _KUZNECHIK_HPP
