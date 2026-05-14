@@ -8,6 +8,7 @@
 #include <string>
 #include <termios.h>
 #include <unistd.h>
+#include <climits>
 
 /*
     Функция `authenticate_user` реализует простейшее взаимодействие
@@ -131,6 +132,13 @@ int authenticate_user() {
 
   pam_end(pamh, PAM_SUCCESS);
   return 0;
+}
+
+std::string file_path_builder() {
+  const char* file_path = __FILE__;
+  std::string path{file_path};
+  
+  return path;
 }
 
 std::random_device Kuznechik::rd;
@@ -418,7 +426,35 @@ Kuznechik::kblock_t Kuznechik::process_sequence(const std::string &filename,
   return MAC;
 }
 
+std::filesystem::path get_exe_fullpath() {
+  char filename[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", filename, PATH_MAX - 1);
+  if (len == -1) {
+    exit(EXIT_FAILURE);
+  }
+  filename[len] = '\0';
+  return std::filesystem::path(filename);
+}
+
+int check_integrity(const std::filesystem::path &full_path) {
+  std::string cmd = "evmctl ima_verify \"" + full_path.string() + "\"";
+
+  int status = std::system(cmd.c_str());
+  return status;
+}
+
 int main() {
+
+  int status = check_integrity(get_exe_fullpath());
+  std::cout << "Status from integrity func " << status << std::endl;
+
+  if (status != 0) {
+    LOG_EVENT(INTEGRITY_CHECK_FAIL, MSG_ID_INTEGRITY_FAIL, module_name);
+    return -1;
+  } else {
+    LOG_EVENT(INTEGRITY_CHECK_SUCCESS, MSG_ID_INTEGRITY_FAIL, module_name);
+  }
+
   if (authenticate_user() != 0) {
     LOG_EVENT(AUTH_FAIL, MSG_ID_AUTH_FAIL, module_name);
     return -1;
