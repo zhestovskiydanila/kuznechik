@@ -88,7 +88,9 @@ int my_conv(int num_msg, const pam_message **msg, pam_response **resp,
 /* ---------------------------------------------------------------------- */
 int authenticate_user() {
   const char *service_name = module_name;
-  const char *username = getlogin();
+  const uid_t user_uid = geteuid();
+  const passwd* user_pwd = getpwuid(user_uid);
+  const char *username = user_pwd->pw_name;
 
   if (!username) {
     std::cerr << "Unable to obtain current user name\n";
@@ -437,8 +439,7 @@ std::filesystem::path get_exe_fullpath() {
 }
 
 int check_integrity(const std::filesystem::path &full_path) {
-  std::string cmd = "evmctl ima_verify \"" + full_path.string() + "\"";
-
+  const std::string cmd = "evmctl ima_verify \"" + full_path.string() + "\" > /dev/null 2>&1";
   int status = std::system(cmd.c_str());
   return status;
 }
@@ -446,7 +447,6 @@ int check_integrity(const std::filesystem::path &full_path) {
 int main() {
 
   int status = check_integrity(get_exe_fullpath());
-  std::cout << "Status from integrity func " << status << std::endl;
 
   if (status != 0) {
     LOG_EVENT(INTEGRITY_CHECK_FAIL, MSG_ID_INTEGRITY_FAIL, module_name);

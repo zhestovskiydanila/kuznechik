@@ -13,7 +13,7 @@
 #include <vector>
 
 static const char *module_name = "kuznechik-mac";
-static constexpr std::size_t BUFF_SIZE = (1 << 17);
+static constexpr std::size_t BUFF_SIZE = (1 << 20);
 static constexpr std::size_t BLOCK_SIZE = 16;
 static constexpr std::size_t KEY_SIZE = 32;
 
@@ -65,7 +65,8 @@ public:
 
   void authenticate_message(const kblock_t &msg);
   kblock_t process_sequence(const std::string &filename);
-  kblock_t process_sequence(const std::string &filename, const std::string &keyfile, int key_upd_interval);
+  kblock_t process_sequence(const std::string &filename,
+                            const std::string &keyfile, int key_upd_interval);
 
   friend std::ostream &operator<<(std::ostream &os, const kblock_t &block);
 
@@ -137,7 +138,7 @@ private:
     }
   }
 
-  alignas(16) inline static const auto L = []() {
+  alignas(64) inline static const auto L = []() {
     std::array<std::array<kblock_t, 256>, 16> L{};
     for (int i = 0; i < 16; ++i) {
       for (int x = 0; x < 256; x++) {
@@ -150,7 +151,7 @@ private:
     return static_cast<const std::array<std::array<kblock_t, 256>, 16>>(L);
   }();
 
-  alignas(16) inline static const auto SL = []() {
+  alignas(64) inline static const auto SL = []() {
     std::array<std::array<kblock_t, 256>, 16> SL{};
     for (int i = 0; i < 16; ++i) {
       for (int x = 0; x < 256; x++) {
@@ -162,7 +163,6 @@ private:
   }();
 
   alignas(16) kblock_t MAC;
-
 
   static inline void func_L_fast(kblock_t &msg) {
     __m128i acc = _mm_setzero_si128();
@@ -274,8 +274,7 @@ private:
   }
 
   inline static void XOR(kblock_t &lhs, const kblock_t &rhs) {
-    volatile __m128i a =
-        _mm_loadu_si128(reinterpret_cast<__m128i *>(lhs.data()));
+    __m128i a = _mm_loadu_si128(reinterpret_cast<__m128i *>(lhs.data()));
     __m128i b = _mm_loadu_si128(reinterpret_cast<const __m128i *>(rhs.data()));
     __m128i r = _mm_xor_si128(a, b);
     _mm_storeu_si128(reinterpret_cast<__m128i *>(lhs.data()), r);
@@ -413,8 +412,9 @@ inline std::ostream &operator<<(std::ostream &os,
   return os;
 }
 
-inline std::ostream& operator<<(std::ostream &os, const Kuznechik::kkey_t &mkey) {
-   std::ios_base::fmtflags f(os.flags());
+inline std::ostream &operator<<(std::ostream &os,
+                                const Kuznechik::kkey_t &mkey) {
+  std::ios_base::fmtflags f(os.flags());
 
   char fill = os.fill();
   os << std::hex;
@@ -429,6 +429,5 @@ inline std::ostream& operator<<(std::ostream &os, const Kuznechik::kkey_t &mkey)
 
   return os;
 }
-
 
 #endif // _KUZNECHIK_HPP
