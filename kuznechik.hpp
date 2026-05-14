@@ -2,14 +2,21 @@
 #define _KUZNECHIK_HPP
 
 #include <array>
+#include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <immintrin.h>
 #include <iomanip>
 #include <iostream>
 #include <pwd.h>
 #include <random>
+#include <string>
 #include <sys/types.h>
+#include <termios.h>
+#include <unistd.h>
 #include <vector>
 
 static const char *module_name = "kuznechik-mac";
@@ -49,7 +56,6 @@ public:
   static const std::size_t BLOCK_SIZE = 16;
   static const std::size_t KEY_SIZE = 32;
   static const uint8_t B128 = 0x87;
-  static const uint8_t GPOLY = 0xC3;
   static const uint8_t PADDING_CONST = 0x80;
   static const std::size_t ROUNDS = 10;
 
@@ -299,7 +305,6 @@ private:
   }
 
   inline static void flush_master_key(kkey_t &mkey) {
-
     for (int i = 0; i < KEY_SIZE; ++i) {
       mkey[i] = static_cast<uint8_t>(dist(rd));
     }

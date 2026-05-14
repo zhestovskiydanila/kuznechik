@@ -1,14 +1,7 @@
 #include "kuznechik.hpp"
 #include "auth.h"
 #include "log.h"
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <termios.h>
-#include <unistd.h>
-#include <climits>
+
 
 /*
     Функция `authenticate_user` реализует простейшее взаимодействие
@@ -105,7 +98,7 @@ int authenticate_user() {
   newt = oldt;
   newt.c_lflag &= ~ECHO;
   tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-  std::getline(std::cin, password);
+  std::cin >> password;
   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
   std::cout << std::endl;
 
@@ -445,6 +438,8 @@ int check_integrity(const std::filesystem::path &full_path) {
 }
 
 int main() {
+  
+  LOG_EVENT(MODULE_STARTUP, MSG_ID_MODULE_START, module_name);
 
   int status = check_integrity(get_exe_fullpath());
 
